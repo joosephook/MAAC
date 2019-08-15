@@ -174,3 +174,199 @@ class AttentionCritic(nn.Module):
             return all_rets[0]
         else:
             return all_rets
+
+
+class SelectiveAttentionNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim, widths, hidden_layers, selector_width, selector_depth):
+        super(SelectiveAttentionNetwork, self).__init__()
+        assert selector_depth >= 1, "Need at least one hidden layer for selector"
+        assert len(widths) == len(hidden_layers), "Mismatch between no. of widths and hidden layers for subnetworks"
+
+        self.strains = []
+        self.strain_params = nn.ModuleList()
+        self.strain_hidden_activation = nn.ReLU()
+        # create the different strains/subnetworks
+        for w, d in zip(widths, hidden_layers):
+            s = nn.Linear(input_dim, w)
+            strain = [s]
+            self.strain_params.append(s)
+
+            for __ in range(d-1):
+                s = nn.Linear(w, w)
+                strain.append(s)
+                self.strain_params.append(s)
+
+            s = nn.Linear(w, output_dim)
+            strain.append(s)
+            self.strain_params.append(s)
+            self.strains.append(strain)
+
+        # create selector network architecture
+        self.selector_input_dim = input_dim + output_dim * len(widths)
+        self.selector_output_dim = len(widths)
+        selector_width = self.selector_input_dim
+        self.selector_hidden_activation = nn.ReLU()
+
+        s = nn.Linear(self.selector_input_dim, selector_width)
+        self.selector = [s]
+        self.selector_params = nn.ModuleList()
+        self.selector_params.append(s)
+        self.selector_output_activation = nn.Softmax(dim=0)
+
+        for __ in range(selector_depth-1):
+            s = nn.Linear(selector_width, selector_width)
+            self.selector.append(s)
+            self.selector_params.append(s)
+
+        s = nn.Linear(self.selector_input_dim, self.selector_output_dim)
+        self.selector.append(s)
+        self.selector_params.append(s)
+
+
+    def forward(self, input):
+        # define forward pass through network
+        strain_outputs = []
+
+        for strain in self.strains:
+            x = input
+
+            for layer in strain[:-1]:
+                x = layer(x)
+                x = self.strain_hidden_activation(x)
+            else:
+                # final layer output
+                x = strain[-1](x)
+                strain_outputs.append(x)
+
+        # concatenate strain outputs horizontally to single vector
+        strain_outs = torch.cat(tuple(strain_outputs), dim=-1)
+
+        # create selector input vector
+        selector_input = [strain_outs]
+        selector_input.append(input)
+        selector_input = torch.cat(tuple(selector_input), dim=-1)
+
+        # score the output
+        x = selector_input
+        for layer in self.selector[:-1]:
+            x = layer(x)
+            x = self.selector_hidden_activation(x)
+        else:
+            x = self.selector[-1](x)
+            scores = self.selector_output_activation(x)
+
+
+        outs = []
+        for i in range(len(strain_outputs)):
+            score = scores[:, i:i+1].repeat(1, 5)
+            out = strain_outputs[i]
+            scored_out = out * score
+            outs.append(scored_out)
+        else:
+            output = sum(outs)
+
+
+        return output
+
+
+
+class SelectiveAttentionCritic(nn.Module):
+    """
+    Attention network, used as critic for all agents. Each agent gets its own
+    observation and action, and can also attend over the other agents' encoded
+    observations and actions.
+    """
+    def __init__(self, sa_sizes, widths, hidden_layers, selector_width, selector_depth, hidden_dim=32, **kwargs):
+        """
+        Inputs:
+            sa_sizes (list of (int, int)): Size of state and action spaces per
+                                          agent
+            hidden_dim (int): Number of hidden dimensions
+            norm_in (bool): Whether to apply BatchNorm to input
+            attend_heads (int): Number of attention heads to use (use a number
+                                that hidden_dim is divisible by)
+        """
+        super(SelectiveAttentionCritic, self).__init__()
+        self.sa_sizes = sa_sizes
+        self.nagents = len(sa_sizes)
+        self.full_input_size = np.sum(sa_sizes)
+
+        self.critics = nn.ModuleList()
+
+        # iterate over agents
+        for sdim, adim in sa_sizes:
+            #critic = self.build_critic(sa_sizes, hidden_dim, norm_in, attend_heads)
+            # initialize critic
+            idim = sdim + adim
+            odim = adim
+
+            # def __init__(self, input_dim, output_dim, widths, hidden_layers, selector_width, selector_depth):
+            # create critics
+            critic = SelectiveAttentionNetwork(input_dim=self.full_input_size,
+                                               output_dim=odim,
+                                               widths = list(range(2, 4)),
+                                               hidden_layers = list(range(2, 4)),
+                                               selector_width=4,
+                                               selector_depth=2
+                                               )
+            self.critics.append(critic)
+
+    def forward(self, inps, agents=None, return_q=True, return_all_q=False,
+                regularize=False, return_attend=False, logger=None, niter=0):
+        """
+        Inputs:
+            inps (list of PyTorch Matrices): Inputs to each agents' encoder
+                                             (batch of obs + ac)
+            agents (int): indices of agents to return Q for
+            return_q (bool): return Q-value
+            return_all_q (bool): return Q-value for all actions
+            regularize (bool): returns values to add to loss function for
+                               regularization
+            return_attend (bool): return attention weights per agent
+            logger (TensorboardX SummaryWriter): If passed in, important values
+                                                 are logged
+        """
+        if agents is None:
+            agents = range(self.nagents)
+
+        # leave this in for compatibility
+        states = [s for s, a in inps]
+        actions = [a for s, a in inps]
+        inps = [torch.cat((s, a), dim=1) for s, a in inps]
+
+        # calculate Q per agent
+        all_rets = []
+        for i, a_i in enumerate(agents):
+            agent_rets = []
+            critic_in = torch.cat(tuple(inps), dim=1)
+            all_q = self.critics[a_i](critic_in)
+            int_acs = actions[a_i].max(dim=1, keepdim=True)[1]
+            q = all_q.gather(1, int_acs)
+            if return_q:
+                agent_rets.append(q)
+            if return_all_q:
+                agent_rets.append(all_q)
+            if regularize:
+                pass
+                # regularize magnitude of attention logits
+                # attend_mag_reg = 1e-3 * sum((logit**2).mean() for logit in
+                #                             all_attend_logits[i])
+                # regs = (attend_mag_reg,)
+                # agent_rets.append(regs)
+            if return_attend:
+                # agent_rets.append(np.array(all_attend_probs[i]))
+                pass
+            if logger is not None:
+                # logger.add_scalars('agent%i/attention' % a_i,
+                #                    dict(('head%i_entropy' % h_i, ent) for h_i, ent
+                #                         in enumerate(head_entropies)),
+                #                    niter)
+                pass
+            if len(agent_rets) == 1:
+                all_rets.append(agent_rets[0])
+            else:
+                all_rets.append(agent_rets)
+        if len(all_rets) == 1:
+            return all_rets[0]
+        else:
+            return all_rets
