@@ -17,6 +17,11 @@ MODELS = {
     'selective-attention-sac': SelectiveAttentionSAC
 }
 
+EP_LENGTH = {
+    'fullobs_collect_treasure': 100,
+    'multi_speaker_listener': 25
+}
+
 def make_parallel_env(env_id, n_rollout_threads, seed):
     def get_env_fn(rank):
         def init_env():
@@ -50,6 +55,7 @@ def run(config):
     torch.manual_seed(run_num)
     np.random.seed(run_num)
     env = make_parallel_env(config.env_id, config.n_rollout_threads, run_num)
+    episode_length = EP_LENGTH[config.env_id]
 
     if config.test:
         # test!
@@ -162,7 +168,7 @@ def run(config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument("env_id", help="Name of environment")
+    parser.add_argument("env_id", help="Name of environment", choices=['fullobs_collect_treasure', 'multi_speaker_listener'])
     parser.add_argument("model_name",
                         help="Name of directory to store " +
                              "model/training contents")
