@@ -304,10 +304,10 @@ class SelectiveAttentionCritic(nn.Module):
             # create critics
             critic = SelectiveAttentionNetwork(input_dim=self.full_input_size,
                                                output_dim=odim,
-                                               widths = list(range(2, 4)),
-                                               hidden_layers = list(range(2, 4)),
-                                               selector_width=4,
-                                               selector_depth=2
+                                               widths=widths,
+                                               hidden_layers=hidden_layers,
+                                               selector_width=selector_width,
+                                               selector_depth=selector_depth
                                                )
             self.critics.append(critic)
 
