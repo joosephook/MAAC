@@ -127,8 +127,8 @@ class AttentionSAC(object):
             curr_ac, probs, log_pi, pol_regs, ent = pi(
                 ob, return_all_probs=True, return_log_pi=True,
                 regularize=True, return_entropy=True)
-            logger.add_scalar('agent%i/policy_entropy' % a_i, ent,
-                              self.niter)
+            if logger is not None:
+                logger.add_scalar('agent%i/policy_entropy' % a_i, ent, self.niter)
             samp_acs.append(curr_ac)
             all_probs.append(probs)
             all_log_pis.append(log_pi)
@@ -407,8 +407,8 @@ class SelectiveAttentionSAC(object):
             curr_ac, probs, log_pi, pol_regs, ent = pi(
                 ob, return_all_probs=True, return_log_pi=True,
                 regularize=True, return_entropy=True)
-            logger.add_scalar('agent%i/policy_entropy' % a_i, ent,
-                              self.niter)
+            if logger is not None:
+                logger.add_scalar('agent%i/policy_entropy' % a_i, ent, self.niter)
             samp_acs.append(curr_ac)
             all_probs.append(probs)
             all_log_pis.append(log_pi)
