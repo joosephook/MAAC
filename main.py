@@ -10,11 +10,13 @@ from utils.make_env import make_env
 from utils.buffer import ReplayBuffer
 from utils.env_wrappers import SubprocVecEnv, DummyVecEnv
 from algorithms.attention_sac import AttentionSAC, SelectiveAttentionSAC
+from functools import partial
 
 
 MODELS = {
-    'attention-sac': AttentionSAC,
-    'selective-attention-sac': SelectiveAttentionSAC
+    'attention-sac': (AttentionSAC, dict()),
+    'selective-attention-sac': (SelectiveAttentionSAC, dict(with_selector=True)),
+    'selectorless-attention-sac': (SelectiveAttentionSAC, dict(with_selector=False))
 }
 
 EP_LENGTH = {
@@ -50,7 +52,7 @@ def run(config):
     curr_run = 'run%i' % run_num
     run_dir = model_dir / curr_run
     log_dir = run_dir / 'logs'
-    model_type = MODELS[config.model]
+    model_type, model_kwargs = MODELS[config.model]
 
     torch.manual_seed(run_num)
     np.random.seed(run_num)
@@ -106,7 +108,8 @@ def run(config):
                                          pol_hidden_dim=config.pol_hidden_dim,
                                          critic_hidden_dim=config.critic_hidden_dim,
                                          attend_heads=config.attend_heads,
-                                         reward_scale=config.reward_scale)
+                                         reward_scale=config.reward_scale,
+                                         **model_kwargs)
         replay_buffer = ReplayBuffer(config.buffer_length, model.nagents,
                                      [obsp.shape[0] for obsp in env.observation_space],
                                      [acsp.shape[0] if isinstance(acsp, Box) else acsp.n
@@ -143,8 +146,8 @@ def run(config):
                     for u_i in range(config.num_updates):
                         sample = replay_buffer.sample(config.batch_size,
                                                       to_gpu=config.use_gpu)
-                        model.update_critic(sample, logger=logger)
-                        model.update_policies(sample, logger=logger)
+                        model.update_critic(sample, logger=None)
+                        model.update_policies(sample, logger=None)
                         model.update_all_targets()
                     model.prep_rollouts(device='cpu')
             ep_rews = replay_buffer.get_average_rewards(
@@ -194,6 +197,7 @@ if __name__ == '__main__':
     parser.add_argument("--use_gpu", action='store_true')
     parser.add_argument("--test", type=str, default='')
     parser.add_argument("--model", type=str, choices=list(MODELS.keys()))
+    parser.add_argument("--with_selector", action='store_true')
 
 
     config = parser.parse_args()

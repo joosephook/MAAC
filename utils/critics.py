@@ -268,7 +268,50 @@ class SelectiveAttentionNetwork(nn.Module):
 
         return output
 
+class AttentionNetwork(nn.Module):
+    def __init__(self, input_dim, output_dim, widths, hidden_layers, selector_width, selector_depth):
+        super(AttentionNetwork, self).__init__()
+        assert selector_depth >= 1, "Need at least one hidden layer for selector"
+        assert len(widths) == len(hidden_layers), "Mismatch between no. of widths and hidden layers for subnetworks"
 
+        self.strains = []
+        self.strain_params = nn.ModuleList()
+        self.strain_hidden_activation = nn.ReLU()
+        # create the different strains/subnetworks
+        for w, d in zip(widths, hidden_layers):
+            s = nn.Linear(input_dim, w)
+            strain = [s]
+            self.strain_params.append(s)
+
+            for __ in range(d-1):
+                s = nn.Linear(w, w)
+                strain.append(s)
+                self.strain_params.append(s)
+
+            s = nn.Linear(w, output_dim)
+            strain.append(s)
+            self.strain_params.append(s)
+            self.strains.append(strain)
+
+    def forward(self, input):
+        # define forward pass through network
+        strain_outputs = []
+
+        for strain in self.strains:
+            x = input
+
+            for layer in strain[:-1]:
+                x = layer(x)
+                x = self.strain_hidden_activation(x)
+            else:
+                # final layer output
+                x = strain[-1](x)
+                strain_outputs.append(x)
+
+        # concatenate strain outputs horizontally to single vector
+        strain_outs = torch.stack(strain_outputs, dim=0).sum(0)
+
+        return strain_outs
 
 class SelectiveAttentionCritic(nn.Module):
     """
@@ -276,7 +319,7 @@ class SelectiveAttentionCritic(nn.Module):
     observation and action, and can also attend over the other agents' encoded
     observations and actions.
     """
-    def __init__(self, sa_sizes, widths, hidden_layers, selector_width, selector_depth, hidden_dim=32, **kwargs):
+    def __init__(self, sa_sizes, widths, hidden_layers, selector_width, selector_depth, with_selector=True, **kwargs):
         """
         Inputs:
             sa_sizes (list of (int, int)): Size of state and action spaces per
@@ -290,6 +333,7 @@ class SelectiveAttentionCritic(nn.Module):
         self.sa_sizes = sa_sizes
         self.nagents = len(sa_sizes)
         self.full_input_size = np.sum(sa_sizes)
+        self.with_selector = with_selector
 
         self.critics = nn.ModuleList()
 
@@ -302,7 +346,11 @@ class SelectiveAttentionCritic(nn.Module):
 
             # def __init__(self, input_dim, output_dim, widths, hidden_layers, selector_width, selector_depth):
             # create critics
-            critic = SelectiveAttentionNetwork(input_dim=self.full_input_size,
+            if with_selector:
+                CriticNetwork = SelectiveAttentionNetwork
+            else:
+                CriticNetwork = AttentionNetwork
+            critic = CriticNetwork(input_dim=self.full_input_size,
                                                output_dim=odim,
                                                widths=widths,
                                                hidden_layers=hidden_layers,
