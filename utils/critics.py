@@ -182,6 +182,7 @@ class SelectiveAttentionNetwork(nn.Module):
         assert selector_depth >= 1, "Need at least one hidden layer for selector"
         assert len(widths) == len(hidden_layers), "Mismatch between no. of widths and hidden layers for subnetworks"
 
+        self.selector_layers = []
         self.strains = []
         self.strain_params = nn.ModuleList()
         self.strain_hidden_activation = nn.ReLU()
@@ -190,6 +191,7 @@ class SelectiveAttentionNetwork(nn.Module):
             s = nn.Linear(input_dim, w)
             strain = [s]
             self.strain_params.append(s)
+            self.selector_layers.append(s.weight)
 
             for __ in range(d-1):
                 s = nn.Linear(w, w)
@@ -267,6 +269,9 @@ class SelectiveAttentionNetwork(nn.Module):
 
 
         return output
+
+    def get_selector_layers(self):
+        return self.selector_layers
 
 class AttentionNetwork(nn.Module):
     def __init__(self, input_dim, output_dim, widths, hidden_layers, selector_width, selector_depth):
@@ -395,7 +400,10 @@ class SelectiveAttentionCritic(nn.Module):
             if return_all_q:
                 agent_rets.append(all_q)
             if regularize:
-                pass
+                selectors = self.critics[a_i].get_selector_layers();
+                weight_sum = [torch.sum(w) for w in selectors]
+                l1_loss = sum(weight_sum)
+                agent_rets.append((l1_loss,))
                 # regularize magnitude of attention logits
                 # attend_mag_reg = 1e-3 * sum((logit**2).mean() for logit in
                 #                             all_attend_logits[i])

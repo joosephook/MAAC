@@ -288,6 +288,7 @@ class SelectiveAttentionSAC(object):
                  reward_scale=10.,
                  pol_hidden_dim=128,
                  critic_hidden_dim=128, attend_heads=4,
+                 l1_reg=0.01,
                  **kwargs):
         """
         Inputs:
@@ -306,6 +307,7 @@ class SelectiveAttentionSAC(object):
             hidden_dim (int): Number of hidden dimensions for networks
         """
         self.nagents = len(sa_size)
+        self.l1_reg = l1_reg
 
         self.agents = [AttentionAgent(lr=pi_lr,
                                       hidden_dim=pol_hidden_dim,
@@ -377,13 +379,15 @@ class SelectiveAttentionSAC(object):
         critic_rets = self.critic(critic_in, regularize=True,
                                   logger=logger, niter=self.niter)
         q_loss = 0
-        for a_i, nq, log_pi, pq in zip(range(self.nagents), next_qs,
+        for a_i, nq, log_pi, (pq, regs) in zip(range(self.nagents), next_qs,
                                                next_log_pis, critic_rets):
             target_q = (rews[a_i].view(-1, 1) +
                         self.gamma * nq *
                         (1 - dones[a_i].view(-1, 1)))
             if soft:
                 target_q -= log_pi / self.reward_scale
+            for reg in regs:
+                q_loss += self.l1_reg * reg
             q_loss += MSELoss(pq, target_q.detach())
         q_loss.backward()
         grad_norm = torch.nn.utils.clip_grad_norm(
@@ -509,6 +513,7 @@ class SelectiveAttentionSAC(object):
                       pi_lr=0.01, q_lr=0.01,
                       reward_scale=10.,
                       pol_hidden_dim=128, critic_hidden_dim=128, attend_heads=4,
+                      l1_reg=0.01,
                       **kwargs):
         """
         Instantiate instance of this class from multi-agent environment
@@ -534,7 +539,8 @@ class SelectiveAttentionSAC(object):
                      'critic_hidden_dim': critic_hidden_dim,
                      'attend_heads': attend_heads,
                      'agent_init_params': agent_init_params,
-                     'sa_size': sa_size}
+                     'sa_size': sa_size,
+                     'l1_reg': l1_reg}
         instance = cls(**init_dict)
         instance.init_dict = init_dict
         return instance

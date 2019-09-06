@@ -109,6 +109,7 @@ def run(config):
                                          critic_hidden_dim=config.critic_hidden_dim,
                                          attend_heads=config.attend_heads,
                                          reward_scale=config.reward_scale,
+                                         l1_reg=config.l1_reg,
                                          **model_kwargs)
         replay_buffer = ReplayBuffer(config.buffer_length, model.nagents,
                                      [obsp.shape[0] for obsp in env.observation_space],
@@ -196,6 +197,7 @@ if __name__ == '__main__':
     parser.add_argument("--q_lr", default=0.001, type=float)
     parser.add_argument("--tau", default=0.005, type=float) # paper said 0.005 instead of 0.001
     parser.add_argument("--gamma", default=0.99, type=float)
+    parser.add_argument("--l1_reg", default=0.05, type=float)
     parser.add_argument("--reward_scale", default=100., type=float)
     parser.add_argument("--use_gpu", action='store_true')
     parser.add_argument("--test", type=str, default='')
